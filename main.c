@@ -13,6 +13,15 @@
 #include <math.h>
 #include <stdint.h>
 #include <windows.h>
+#if defined(WIN32)
+#include <io.h>
+#include <fcntl.h>
+#endif /* defined(WIN32) */
+
+#if defined(WIN32)
+_setmode(_fileno(stdin), _O_BINARY);
+#endif /* defined(WIN32) */
+
 unsigned char memory[MEM_SIZE] = {0};
 char screen[SCREEN_WIDTH*SCREEN_HEIGHT];
 unsigned char *V;
