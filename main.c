@@ -1,7 +1,7 @@
 #define MEM_SIZE 0xFFF
 #define INTERPRETER_SIZE 0x1FF
-#define SCREEN_WIDTH 0x40
-#define SCREEN_HEIGHT 0x20
+#define SCREEN_WIDTH 0x42
+#define SCREEN_HEIGHT 0x21
 #define REGISTER_START 0xF00
 #define CHARACTER_SIZE 5
 #define PROGRAM_BEGIN 0x200
@@ -13,30 +13,29 @@
 #include <math.h>
 #include <stdint.h>
 #include <windows.h>
-#if defined(WIN32)
-#include <io.h>
-#include <fcntl.h>
-#endif /* defined(WIN32) */
-
-#if defined(WIN32)
-_setmode(_fileno(stdin), _O_BINARY);
-#endif /* defined(WIN32) */
-
+#include <pthread.h>
 unsigned char memory[MEM_SIZE] = {0};
 char screen[SCREEN_WIDTH*SCREEN_HEIGHT];
 unsigned char *V;
 unsigned char* low_I;
 unsigned char* high_I;
-uint16_t I;
+uint16_t I; 
+int milliNow = 0;
+int milliLast = 0;
 char keyboard_map[0x10] = "X123QWEASDC4RFV";
-unsigned char * ST = 0;
-unsigned char * DT = 0;
+unsigned char * ST;
+unsigned char * DT;
 /*Manages Memory*/
 void setup()
 {
 	V  = memory+REGISTER_START;
-	low_I = memory+REGISTER_START+16;
-	high_I = memory+REGISTER_START+17;
+	low_I = memory+REGISTER_START+17;
+	high_I = memory+REGISTER_START+16;
+	DT = memory+80;
+	ST = memory+81;
+	*DT = 30;
+	*ST = 30;
+	
 	//0
 	memory[0] = 0xF0;memory[1] = 0x90;memory[2] = 0x90;memory[3] = 0x90;memory[4] = 0xF0;
 	//1
@@ -71,9 +70,18 @@ void setup()
 	memory[75] = 0xF0;memory[76] = 0x80;memory[77] = 0xF0;memory[78] = 0x80;memory[79] = 0x80;
 }
 // Counter to be used in thread
-void counter(unsigned char * counter){
-	
+void *timedCounter(void * counter_){
+	unsigned char *counter;
+	counter = (unsigned char *)counter_;
+	while(!0){
+		Sleep(1000/60);
+		if(*counter>0){
+		//printf("HERE");
+			*counter = *counter - 1;
+		}
+	}
 }
+unsigned char display[(SCREEN_WIDTH+1)*SCREEN_HEIGHT];
 void draw(int sprite, char x, char y, char sprite_size)
 {
 	for(int i = 0; i < sprite_size; i++)
@@ -81,23 +89,24 @@ void draw(int sprite, char x, char y, char sprite_size)
 		for(int j = 0; j < 5; j++){
 			if(memory[sprite+i]&(int)pow(2,8-j))
 			{
-				screen[x+j+((y+i)*SCREEN_WIDTH)] = !screen[x+j+(i*SCREEN_WIDTH)];
+				screen[x+j+((y+i)*SCREEN_WIDTH)] = !screen[x+j+((y+i)*SCREEN_WIDTH)];
 			
 			}
 		}
 	}
-	system("cls");
 	for(int i = 0; i < SCREEN_HEIGHT; i++)
 	{
 		for(int j = 0; j < SCREEN_WIDTH; j++)
 		{
 			if(screen[j+(i*SCREEN_WIDTH)])
-				printf("O");
+				display[j+(i*SCREEN_WIDTH)] = 0xDB;
 			else
-				printf(" ");
+				display[j+(i*SCREEN_WIDTH)] = ' ';
 		}
-		printf("\n");
+		display[(SCREEN_WIDTH-1)+(i*SCREEN_WIDTH)] = '\n';
 	}
+	system("cls");
+	printf(display);
 }
 void clear()
 {
@@ -127,8 +136,9 @@ void parser()
 	int j;
 	for(i = PROGRAM_BEGIN; i<PROGRAM_END; i+=2){
 		uint16_t c = memory[i]*0x100 + memory[i+1];
-		//printf("c: %x\n", c);
-			char x = (c%0xF000)/0x100; 
+		//printf("i: %x, DT: %d, ST: %d, C: %x\n", i, *DT, *ST, c);
+		char x = (c%0xF000)/0x100; 
+		printf("i: %x", i);
 		switch((int)(c/0x1000))
 		{
 			case 0:
@@ -136,32 +146,40 @@ void parser()
 					clear();
 				}
 				if(c == 0x00EE){
-					i = memory[STACK+memory[STACK]];
+					
+				 	printf("STACK RETURN: STACK_NUM=%d, new i=%x\n", memory[STACK], 
+						(memory[0xEA2]));
+					i = (memory[STACK+memory[STACK]*2]<<8)+memory[STACK+memory[STACK]*2+1];
 					memory[STACK+memory[STACK]] = 0;
 					memory[STACK] = memory[STACK]-1;
-				}
-				if(c == 0x0000){
-					return;
+				 	printf("STACK RETURN: STACK_NUM=%d, i=%x\n", memory[STACK], i);
 				}
 			break;
 			//1nnn JUMP
 			case 1:
-				i=c%0x1000;
+				i=(c%0x1000)-0x2;
 			break;
 			//2nnn GO TO SUBROTUINE
 			case 2:	
 				memory[STACK]=memory[STACK]+1;
-				if(STACK+memory[STACK]<0xEFF)
-					memory[STACK+memory[STACK]]=i;
+				if(STACK+memory[STACK]*2<0xEFF)
+				{
+					memory[STACK+memory[STACK]*2]=(i>>8);
+					memory[STACK+memory[STACK]*2+1]=(i)-((i>>8)<<8);
+				}
 				else
 				{
 					printf("ERR - Stack Overload");
 					return;
 				}
-				i=c%0x1000;
+				printf("STACK CALL: STACK_NUM=%d, i=%x\n, memory[STACK+memory[STACK]]=%x%x", memory[STACK], i,
+					memory[STACK+memory[STACK]*2],memory[STACK+memory[STACK]*2+1]);
+					system("pause");
+				i=(c%0x1000)-0x2;
 			break;
 			//3xkk SKIP NEXT IF Vx == kk
 			case 3:	
+				//printf("OPERANDS: %x, %x", *(V+((c/0x100)-((c/0x1000)*0x10))), c - (0x100*(c/0x100)));
 				if(
 				*(V+((c/0x100)-((c/0x1000)*0x10)))
 				==
@@ -292,16 +310,18 @@ void parser()
 				*(V+((c/0x10)-( ( (int)(c/0x100) ) *0x10) ) ),
 				(((c)-((c/0x10)*0x10) ) ) );
 			break;
-			// Get key pressed state
+			// Get key at Vx pressed state
 			case 0xE:
+				// if pressed, skip
 				if(c-((c/0x100)*0x100) == 0x9E)
 				{
-					if(GetAsyncKeyState(keyboard_map[((c/0x100)-( (c/0x1000)*0x10) )]) != 0)
+					if(GetAsyncKeyState(keyboard_map[*(V+(((c/0x100)-( (c/0x1000)*0x10) )))]) != 0)
 						i+=2;
 				}
+				//if not pressed, skip
 				if(c-((c/0x100)*0x100) == 0xA1)
 				{
-					if(GetAsyncKeyState(keyboard_map[((c/0x100)-( (c/0x1000)*0x10) )]) == 0)
+					if(GetAsyncKeyState(keyboard_map[*(V+(((c/0x100)-( (c/0x1000)*0x10) )))]) == 0)
 						i+=2;
 				}
 			break;
@@ -313,7 +333,9 @@ void parser()
 					case 0x07:
 						*(V+x)=*DT;
 					break;
-					//TODO: 0x0A
+					case 0x0A:
+						*(V+x)=getchar();
+					break;
 					case 0x15:
 						*DT=*(V+x);
 					break;
@@ -331,9 +353,9 @@ void parser()
 						*low_I = I-((int)*high_I*0x100);
 					break;
 					case 0x33:
-						*low_I   = (x/100);
-						*(low_I+2) = ((x/10)-((x/100)*10));
-						*(low_I+4) = (x-((x/10)*10));
+						*low_I   = (*(V+x)/100);
+						*(low_I+2) = ((*(V+x)/10)-((*(V+x)/100)*10));
+						*(low_I+4) = (*(V+x)-((*(V+x)/10)*10));
 					break;
 					case 0x55:;
 						I = *low_I + ((int)*high_I*0x100);
@@ -364,20 +386,28 @@ int main(int argc, char ** argv) {
 	{
 		screen[i] = 0;
 	}
+	int temp = 0;
 	unsigned char c = 0;
 	char x = 0;
 	i = PROGRAM_BEGIN;
 	// repeat until c is EOF
-	FILE* fp = fopen("Pong.ch8", "r");
+	FILE* fp = fopen("Tetris.ch8", "rb");
 	while(i < PROGRAM_END)
 	{
-		c = fgetc((FILE*)fp);
-		if(c==0xFF)
+		temp = fgetc((FILE*)fp);
+		if(temp == -1)
 			break;
-		printf("%x\n", c);
+		c=(unsigned char)temp;
+		//printf("%x\n", c);
 		memory[i] = c;
 		i++;
 	}
+	pthread_t DTCounter;
+	pthread_t STCounter;
+	int DTEC, STEC;
+    DTEC = pthread_create(&DTCounter, NULL, timedCounter, (void *)&DT);
+    STEC = pthread_create(&STCounter, NULL, timedCounter, (void *)&ST);
 	setup();
-	//parser();
+	printf("threads created, exit codes: %d, %d\n", DTEC, STEC);
+	parser();
 }
