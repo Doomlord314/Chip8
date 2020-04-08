@@ -15,7 +15,7 @@
 #include <windows.h>
 #include <pthread.h>
 unsigned char memory[MEM_SIZE] = {0};
-char screen[SCREEN_WIDTH*SCREEN_HEIGHT];
+unsigned char screen[SCREEN_WIDTH*SCREEN_HEIGHT];
 unsigned char *V;
 unsigned char* low_I;
 unsigned char* high_I;
@@ -25,6 +25,31 @@ int milliLast = 0;
 char keyboard_map[0x10] = "X123QWEASDC4RFV";
 unsigned char * ST;
 unsigned char * DT;
+/*for display on windows*/
+static HANDLE hStdout;
+static HANDLE hStdin;
+static CONSOLE_SCREEN_BUFFER_INFO csbi;
+static const COORD startCoords = {0,0};
+
+
+void init_console_functions (void)
+{
+  hStdout = GetStdHandle(STD_OUTPUT_HANDLE);
+  hStdin = GetStdHandle(STD_INPUT_HANDLE);
+
+  GetConsoleScreenBufferInfo(hStdout, &csbi);
+}
+
+void gotoxy(int x, int y)
+{
+  COORD coord;
+
+  coord.X = x;
+  coord.Y = y;
+
+  SetConsoleCursorPosition(hStdout,coord);
+}
+
 /*Manages Memory*/
 void setup()
 {
@@ -75,18 +100,22 @@ void *timedCounter(void * counter_){
 	counter = (unsigned char *)counter_;
 	while(!0){
 		Sleep(1000/60);
-		if(*counter>0){
+		if(*DT>0){
 		//printf("HERE");
-			*counter = *counter - 1;
+			*DT = *DT - 1;
+		}
+		if(*ST>0){
+		//printf("HERE");
+			*DT = *DT - 1;
 		}
 	}
 }
 unsigned char display[(SCREEN_WIDTH+1)*SCREEN_HEIGHT];
-void draw(int sprite, char x, char y, char sprite_size)
+void draw(int sprite, unsigned char x, unsigned char y, unsigned char sprite_size)
 {
 	for(int i = 0; i < sprite_size; i++)
 	{
-		for(int j = 0; j < 5; j++){
+		for(int j = 0; j < 8   ; j++){
 			if(memory[sprite+i]&(int)pow(2,8-j))
 			{
 				screen[x+j+((y+i)*SCREEN_WIDTH)] = !screen[x+j+((y+i)*SCREEN_WIDTH)];
@@ -107,6 +136,7 @@ void draw(int sprite, char x, char y, char sprite_size)
 	}
 	system("cls");
 	printf(display);
+	//system("pause");
 }
 void clear()
 {
@@ -132,13 +162,17 @@ void parser()
 {
 	srand(time(NULL));
 	uint32_t i;
-	char I = *low_I + ((int)*high_I*0x100);
+	unsigned char I = *low_I + ((int)*high_I*0x100);
 	int j;
 	for(i = PROGRAM_BEGIN; i<PROGRAM_END; i+=2){
 		uint16_t c = memory[i]*0x100 + memory[i+1];
 		//printf("i: %x, DT: %d, ST: %d, C: %x\n", i, *DT, *ST, c);
-		char x = (c%0xF000)/0x100; 
-		printf("i: %x", i);
+		unsigned char x = (c/0x100)-(c/0x1000)*0x10; 
+		unsigned char y = (c/0x10)-(c/0x100)*0x10;
+		unsigned char kk = c- ((c/0x100)*0x100);
+		unsigned char n = c-((c/0x10)*0x10);
+		//printf("x: %x, y: %x, kk: %x, n: %x\n", x, y, kk, n);
+		//printf("i: %x", i);
 		switch((int)(c/0x1000))
 		{
 			case 0:
@@ -146,13 +180,14 @@ void parser()
 					clear();
 				}
 				if(c == 0x00EE){
+				printf("FOUND");
 					
-				 	printf("STACK RETURN: STACK_NUM=%d, new i=%x\n", memory[STACK], 
-						(memory[0xEA2]));
+				 	//printf("STACK RETURN: STACK_NUM=%d, new i=%x\n", memory[STACK], 
+					//	(memory[0xEA2]));
 					i = (memory[STACK+memory[STACK]*2]<<8)+memory[STACK+memory[STACK]*2+1];
 					memory[STACK+memory[STACK]] = 0;
 					memory[STACK] = memory[STACK]-1;
-				 	printf("STACK RETURN: STACK_NUM=%d, i=%x\n", memory[STACK], i);
+				 	//printf("STACK RETURN: STACK_NUM=%d, i=%x\n", memory[STACK], i);
 				}
 			break;
 			//1nnn JUMP
@@ -172,18 +207,18 @@ void parser()
 					printf("ERR - Stack Overload");
 					return;
 				}
-				printf("STACK CALL: STACK_NUM=%d, i=%x\n, memory[STACK+memory[STACK]]=%x%x", memory[STACK], i,
-					memory[STACK+memory[STACK]*2],memory[STACK+memory[STACK]*2+1]);
-					system("pause");
+				//printf("STACK CALL: STACK_NUM=%d, i=%x\n, memory[STACK+memory[STACK]]=%x%x", memory[STACK], i,
+				//	memory[STACK+memory[STACK]*2],memory[STACK+memory[STACK]*2+1]);
+				//	system("pause");
 				i=(c%0x1000)-0x2;
 			break;
 			//3xkk SKIP NEXT IF Vx == kk
 			case 3:	
 				//printf("OPERANDS: %x, %x", *(V+((c/0x100)-((c/0x1000)*0x10))), c - (0x100*(c/0x100)));
 				if(
-				*(V+((c/0x100)-((c/0x1000)*0x10)))
+				*(V+x)
 				==
-				c - (0x100*(c/0x100)))
+				kk)
 				{
 					i+=2;
 				}
@@ -191,9 +226,9 @@ void parser()
 			//4xkk SKIP NEXT IF Vx != kk
 			case 4:	
 				if(
-				*(V+((c/0x100)-((c/0x1000)*0x10)))
+				*(V+x)
 				!=
-				c - (0x100*(c/0x100)))
+				kk)
 				{
 					i+=2;
 				}
@@ -201,9 +236,9 @@ void parser()
 			//6xy0 SKIP NEXT IF Vx == Vy
 			case 5:	
 				if(
-				*(V+((c/0x100)-((c/0x1000)*0x10)))
+				*(V+x)
 					==
-				*(V+((c/0x10)-((c/0x100)*0x10))))
+				*(V+y))
 				{
 					i+=2;
 				}
@@ -211,16 +246,15 @@ void parser()
 			//6xkk Vx = kk
 			case 6:	
 				//printf("HEELOO");
-				*(V+((c/0x100)-((c/0x1000)*0x10))) = c - (0x100*(c/0x100));
+				*(V+x) = kk;
 			break;
 			//7xkk Vx += kk
 			case 7:	
-				*(V+((c/0x100)-((c/0x1000)*0x10))) += c - (0x100*(c/0x100));
+				*(V+x) += kk;
 			break;
 			//multiple
 			case 8:	;
-				char y = c/10 - (c/100)*10; 
-				switch(c-((c/10)*10))
+				switch(c-((c/0x10)*0x10))
 				{
 					case 0:
 						*(V+x) = *(V+y);
@@ -275,9 +309,9 @@ void parser()
 			//9xy0: SKIP IF Vx != Vy
 			case 9:	
 				if(
-				*(V+((c/0x100)-((c/0x1000)*0x10)))
+				*(V+x)
 					!=
-				*(V+((c/0x10)-((c/0x100)*0x10))))
+				*(V+y))
 				{
 					i+=2;
 				}
@@ -296,9 +330,9 @@ void parser()
 			break;
 			//Cxkk: SET Vx = kk&<a random number> 
 			case 0xC:
-				*(V+((c/0x100)-((c/0x1000)*0x10)))
+				*(V+x)
 				=
-				(c - (0x100*(c/0x100)) )& (rand()%255);
+				kk&(rand()%255);
 			break;
 			//Dxyn: Display sprite at I at Vx Vy with size n
 			case 0xD:
@@ -306,32 +340,36 @@ void parser()
 				//*(V+((c/0x10)-( ( (int)(c/0x100) ) *0x10) ) ),
 				//(((c)-((c/0x10)*0x10) ) ) );
 				draw(((*high_I)*0x100)+(*low_I) , 
-				*(V+((c/0x100)-( (c/0x1000)*0x10) ) ), 
-				*(V+((c/0x10)-( ( (int)(c/0x100) ) *0x10) ) ),
-				(((c)-((c/0x10)*0x10) ) ) );
+				*(V+x), 
+				*(V+y),
+				n);
 			break;
 			// Get key at Vx pressed state
 			case 0xE:
 				// if pressed, skip
-				if(c-((c/0x100)*0x100) == 0x9E)
+				if(kk == 0x9E)
 				{
-					if(GetAsyncKeyState(keyboard_map[*(V+(((c/0x100)-( (c/0x1000)*0x10) )))]) != 0)
+					if(GetAsyncKeyState(keyboard_map[*(V+x)]) != 0)
+					{
+						printf("KEY PRESSED: %d", keyboard_map[*(V+x)]);
 						i+=2;
+					}
 				}
 				//if not pressed, skip
-				if(c-((c/0x100)*0x100) == 0xA1)
+				if(kk == 0xA1)
 				{
-					if(GetAsyncKeyState(keyboard_map[*(V+(((c/0x100)-( (c/0x1000)*0x10) )))]) == 0)
+					if(GetAsyncKeyState(keyboard_map[*(V+x)]) == 0)
 						i+=2;
 				}
 			break;
 			// multiple
 			case 0xF:
 			;
-				switch(c-0xF000-(x*0x100))
+				I = *low_I + ((int)*high_I*0x100);
+				switch(kk)
 				{
 					case 0x07:
-						*(V+x)=*DT;
+						*(V+x) = *DT;
 					break;
 					case 0x0A:
 						*(V+x)=getchar();
@@ -353,20 +391,20 @@ void parser()
 						*low_I = I-((int)*high_I*0x100);
 					break;
 					case 0x33:
-						*low_I   = (*(V+x)/100);
-						*(low_I+2) = ((*(V+x)/10)-((*(V+x)/100)*10));
-						*(low_I+4) = (*(V+x)-((*(V+x)/10)*10));
+						*low_I   = (*(V+x)/0x100);
+						*(low_I+2) = ((*(V+x)/0x10)-((*(V+x)/0x100)*0x10));
+						*(low_I+4) = (*(V+x)-((*(V+x)/0x10)*0x10));
 					break;
 					case 0x55:;
 						I = *low_I + ((int)*high_I*0x100);
-						for(j = 0; j < x; j++)
+						for(j = 0; j <= x; j++)
 						{
 							memory[I+j] = *(V+j);
 						}
 					break;
 					case 0x65:;
 						I = *low_I + ((int)*high_I*0x100);
-						for(j = 0; j < x; j++)
+						for(j = 0; j <= x; j++)
 						{
 							*(V+j)=memory[I+j];
 						}
@@ -388,7 +426,7 @@ int main(int argc, char ** argv) {
 	}
 	int temp = 0;
 	unsigned char c = 0;
-	char x = 0;
+	unsigned char x = 0;
 	i = PROGRAM_BEGIN;
 	// repeat until c is EOF
 	FILE* fp = fopen("Tetris.ch8", "rb");
@@ -402,9 +440,10 @@ int main(int argc, char ** argv) {
 		memory[i] = c;
 		i++;
 	}
+	
 	pthread_t DTCounter;
 	pthread_t STCounter;
-	int DTEC, STEC;
+	unsigned char DTEC, STEC;
     DTEC = pthread_create(&DTCounter, NULL, timedCounter, (void *)&DT);
     STEC = pthread_create(&STCounter, NULL, timedCounter, (void *)&ST);
 	setup();
