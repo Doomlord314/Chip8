@@ -59,9 +59,7 @@ int wait_pressed(){
 	while(1){
 		if(_kbhit()){
 			ch = _getch();
-			printf("%c", ch);
 			for(int i = 0; i<0x10; i++){
-				printf("%c == %c = %d\n", keyboard_map[i], ch, keyboard_map[i]+0x20 == ch );
 				if(keyboard_map[i] == ch || keyboard_map[i]+0x20 == ch ){
 					return i;
 				}
@@ -85,10 +83,14 @@ void setup()
 	display = malloc(SCREEN_HEIGHT);
 	for(int i = 0; i < SCREEN_HEIGHT; i++){
 		display[i] = malloc(SCREEN_WIDTH);
+		if(display[i] == NULL){
+			perror("setup: NPE");
+		}
 		for(int j = 0; j < SCREEN_WIDTH; j++){
 			display[i][j] = 0;
 		}
 	}
+	wait_pressed();
 	
 	//0
 	memory[0] = 0xF0;memory[1] = 0x90;memory[2] = 0x90;memory[3] = 0x90;memory[4] = 0xF0;
@@ -142,9 +144,11 @@ void *timedCounter(void * counter_){
 
 
 void draw(int sprite, unsigned char x, unsigned char y, unsigned char sprite_size) {
+	system("cls");
 	for(int i = 0; i < sprite_size; i++){
 		for(int j = 0; j < 8; j++){
 			if(memory[sprite+i]&((int)pow(2, j))){
+				V[0xF] = display[y+i][x+j]?1:V[0xF];
 				display[y+i][x+j] = !display[y+i][x+j] ;
 			}
 		}
@@ -157,20 +161,42 @@ void draw(int sprite, unsigned char x, unsigned char y, unsigned char sprite_siz
 	}
 }
 void clear() {
-	
+	system("cls");
+	printf("CLEAR INITIATED %d\n", display[12][0]);
+	if(display[12] == NULL){
+		printf("AAAAA");
+	}
+
+	for(int i = 0; i < SCREEN_HEIGHT; i++){
+		if(display[i] == NULL){
+			printf("AAAAA %d %d %d %d %d \n", i, display[i-1], display[i-2], display, display[i]);
+			display[i] = malloc(SCREEN_WIDTH);
+			for(int j = 0; j < SCREEN_WIDTH; j++){
+				display[i][j] = 0;
+			}
+		}
+
+		for(int j = 0; j < SCREEN_WIDTH; j++){
+			display[i][j] = 0;
+		}
+	}
 }
 void parser() {
 	srand(time(NULL));
 	int itter = PROGRAM_BEGIN;
+	printf("%x", itter);
 	uint16_t* stack = memory+STACK; /* dangerous, yet a risk I am willing to take */
 	int stack_itter = 0;
-	for(uint16_t c = memory[itter] + (memory[itter+1]*0x100); itter < PROGRAM_END; itter++){
+	uint16_t c = memory[itter+1] + (memory[itter]*0x100);
+	printf("%x: c-%x\n", itter, c);
+	while(itter < PROGRAM_END){
+		
 		/* general variables used in the program */
 		unsigned char x   = (c-((c/0x1000)*0x1000))/0x100; /* third digit of (c - (last digit)) */
 		unsigned char y   = (c-((c/0x100)*0x100))/0x10; /* second digit of (c - (last 2 digits)) */
 		unsigned char n   = (c-((c/0x10)*0x10)); /* c - (last 3 digits) */
-		unsigned char nnn = c-((c/0x1000)*0x1000); /* c - (last digit) */
 		unsigned char kk  = c-((c/0x100)*0x100); /*c - (last 2 digits)*/
+		unsigned int nnn = c-((c/0x1000)*0x1000); /* c - (last digit) */
 		/* do different things depending on the last digit of c*/
 		switch((int)(c/0x1000)){
 			case 0x0:
@@ -181,7 +207,7 @@ void parser() {
 					if(stack_itter == 0){
 						printf("chip8: stack has no values, yet was still asked to return from subroutine\n");
 					} else {
-						stack_itter-=2;
+						stack_itter-=1;
 						itter = stack[stack_itter] ;
 					}
 				}
@@ -190,7 +216,7 @@ void parser() {
 				itter = nnn;
 			break;
 			case 0x2:
-				stack[stack_itter] = itter;
+				stack[stack_itter] = itter+2;
 				stack_itter++;
 				itter = nnn;
 			break;
@@ -299,31 +325,60 @@ void parser() {
 						*I = V[x]*5;
 					break;
 					case 0x33:
-						memory[I] =  V[x]/100;
-						memory[I+1] = (V[x]-((V[x]/100)*100))/10;
-						memory[I+2] =  V[x]-((V[x]/10)*10);
+						memory[(*I)] =  V[x]/100;
+						memory[(*I)+1] = (V[x]-((V[x]/100)*100))/10;
+						memory[(*I)+2] =  V[x]-((V[x]/10)*10);
 					break;
 					case 0x55:
 						for(int j = 0; j < x; j++){
-							memory[i+j] = V[x];
+							memory[(*I)+j] = V[x];
 						}
 					break;
 					case 0x65:
 						for(int j = 0; j < x; j++){
-							V[x] = memory[I+j];
+							V[x] = memory[(*I)+j];
 						}
 					break;
 				}
 			break;
 			
 		}
-		
-		c = memory[itter] + (memory[itter+1]*0x100);
+		c = memory[itter+1] + (memory[itter]*0x100);
+		itter+=2;
 	}
 	
 }
 
 int main(int argc, char ** argv) {
 	setup();
-	/* tests */ 
+	if(argc < 2){
+		printf("chip-8: no file!");
+		return 1;
+	}
+	char* filename = argv[1];
+	printf("%s\n", filename);
+	FILE* binfile = fopen(filename, "rb");
+	int temp = 0;
+	unsigned char c = 0;
+	int i = PROGRAM_BEGIN;
+	printf("%x\n", i);
+	// repeat until c is EOF
+	while(i < PROGRAM_END)
+	{
+		temp = fgetc((FILE*)binfile);
+		if(temp == EOF)
+			break;
+		c=(unsigned char)temp;
+		printf("%x\n", c);
+		memory[i] = c;
+		i++;
+	}
+	pthread_t DTCounter;
+	pthread_t STCounter;
+	int DTEC, STEC;
+	DTEC = pthread_create(&DTCounter, NULL, timedCounter, (void *)&DT);
+    STEC = pthread_create(&STCounter, NULL, timedCounter, (void *)&ST);
+	printf("read memory\n");
+	parser();
+	
 }
