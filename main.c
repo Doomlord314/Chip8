@@ -1,7 +1,7 @@
 #define MEM_SIZE 0xFFF
 #define INTERPRETER_SIZE 0x1FF
-#define SCREEN_WIDTH 0x42
-#define SCREEN_HEIGHT 0x21
+#define SCREEN_WIDTH 0x50
+#define SCREEN_HEIGHT 0x20
 #define REGISTER_START 0xF00
 #define CHARACTER_SIZE 5
 #define PROGRAM_BEGIN 0x200
@@ -52,7 +52,7 @@ void gotoxy(int x, int y)
 }
 
 int pressed(char key){
-	return GetAsyncKeyState(keyboard_map[V[key]]);
+	return GetAsyncKeyState(keyboard_map[key]);
 }
 int wait_pressed(){
 	char ch;
@@ -90,7 +90,6 @@ void setup()
 			display[i][j] = 0;
 		}
 	}
-	wait_pressed();
 	
 	//0
 	memory[0] = 0xF0;memory[1] = 0x90;memory[2] = 0x90;memory[3] = 0x90;memory[4] = 0xF0;
@@ -131,13 +130,16 @@ void *timedCounter(void * counter_){
 	counter = (unsigned char *)counter_;
 	while(!0){
 		Sleep(1000/60);
-		if(*DT>0){
+		if(*DT != 0){
 		//printf("HERE");
 			*DT = *DT - 1;
 		}
-		if(*ST>0){
+		if(*DT == 0){
+			//printf("DT NOW == 0!");
+		}
+		if(*ST != 0){
 		//printf("HERE");
-			*DT = *DT - 1;
+			*ST = *ST - 1;
 		}
 	}
 }
@@ -147,7 +149,7 @@ void draw(int sprite, unsigned char x, unsigned char y, unsigned char sprite_siz
 	system("cls");
 	for(int i = 0; i < sprite_size; i++){
 		for(int j = 0; j < 8; j++){
-			if(memory[sprite+i]&((int)pow(2, j))){
+			if(memory[sprite+i]&((int)pow(2, 8-j))){
 				V[0xF] = display[y+i][x+j]?1:V[0xF];
 				display[y+i][x+j] = !display[y+i][x+j] ;
 			}
@@ -162,7 +164,6 @@ void draw(int sprite, unsigned char x, unsigned char y, unsigned char sprite_siz
 }
 void clear() {
 	system("cls");
-	printf("CLEAR INITIATED %d\n", display[12][0]);
 	if(display[12] == NULL){
 		printf("AAAAA");
 	}
@@ -184,11 +185,9 @@ void clear() {
 void parser() {
 	srand(time(NULL));
 	int itter = PROGRAM_BEGIN;
-	printf("%x", itter);
 	uint16_t* stack = memory+STACK; /* dangerous, yet a risk I am willing to take */
 	int stack_itter = 0;
 	uint16_t c = memory[itter+1] + (memory[itter]*0x100);
-	printf("%x: c-%x\n", itter, c);
 	while(itter < PROGRAM_END){
 		
 		/* general variables used in the program */
@@ -200,9 +199,11 @@ void parser() {
 		/* do different things depending on the last digit of c*/
 		switch((int)(c/0x1000)){
 			case 0x0:
+				/* clear*/
 				if(c == 0x00E0){
 					clear();
 				}
+				/* return from subroutine */
 				if(c == 0x00EE){
 					if(stack_itter == 0){
 						printf("chip8: stack has no values, yet was still asked to return from subroutine\n");
@@ -212,35 +213,43 @@ void parser() {
 					}
 				}
 			break;
+			/* 1nnn: JMP nnn */
 			case 0x1:
 				itter = nnn;
 			break;
+			/* 2nnn: JMP SUBROUTINE @nnn */
 			case 0x2:
 				stack[stack_itter] = itter+2;
 				stack_itter++;
 				itter = nnn;
 			break;
+			/* 3xkk: SKIP IF Vx == kk */
 			case 0x3:
 				if(V[x] == kk){
 					itter+=2;
 				}				
 			break;
+			/* 4xkk: SKIP IF Vx != kk */
 			case 0x4:
 				if(V[x] != kk){
 					itter+=2;
 				}	
 			break;
+			/* 5xy0: SKIP IF Vx == Vy*/
 			case 0x5:
 				if(V[x] == V[y]){
 					itter+=2;
 				}	
 			break;
+			/* 6xkk: SET Vx = kk*/
 			case 0x6:
 				V[x] = kk;	
 			break;
+			/* 3xkk: SET Vx = Vx + kk*/
 			case 0x7:
 				V[x] = V[x] + kk;	
 			break;
+			/* multiple */
 			case 0x8:
 				switch(n){
 					case 0x0:
@@ -307,6 +316,7 @@ void parser() {
 			case 0xF:
 				switch(kk){
 					case 0x07:
+						printf("WAITING %d ", *DT);
 						V[x] = *DT;
 					break;
 					case 0x0A:
@@ -361,7 +371,6 @@ int main(int argc, char ** argv) {
 	int temp = 0;
 	unsigned char c = 0;
 	int i = PROGRAM_BEGIN;
-	printf("%x\n", i);
 	// repeat until c is EOF
 	while(i < PROGRAM_END)
 	{
@@ -369,15 +378,12 @@ int main(int argc, char ** argv) {
 		if(temp == EOF)
 			break;
 		c=(unsigned char)temp;
-		printf("%x\n", c);
 		memory[i] = c;
 		i++;
 	}
-	pthread_t DTCounter;
-	pthread_t STCounter;
-	int DTEC, STEC;
-	DTEC = pthread_create(&DTCounter, NULL, timedCounter, (void *)&DT);
-    STEC = pthread_create(&STCounter, NULL, timedCounter, (void *)&ST);
+	pthread_t counter;
+	int counterEC;
+	counterEC = pthread_create(&counter, NULL, timedCounter, (void *)&DT);
 	printf("read memory\n");
 	parser();
 	
