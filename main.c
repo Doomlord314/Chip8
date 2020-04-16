@@ -252,98 +252,124 @@ void parser() {
 			/* multiple */
 			case 0x8:
 				switch(n){
+					/* 8xy0: Vx = Vy*/
 					case 0x0:
 						V[x] = V[y];	
 					break;
+					/* 8xy1: Vx = Vx OR Vy*/
 					case 0x1:
 						V[x] = V[x] | V[y];	
 					break;
+					/* 8xy2: Vx = Vx AND Vy*/
 					case 0x2:
 						V[x] = V[x] & V[y];	
 					break;
+					/* 8xy3: Vx = Vx XOR Vy*/
 					case 0x3:
 						V[x] = V[x] ^ V[y];	
 					break;
+					/* 8xy4: Vx = Vx + Vy, Vf = Vx + Vy > 255*/
 					case 0x4:
 						V[0xf] = (V[x] + V[y] > 255);
 						V[x] = (V[x] + V[y])%255;
 					break;
+					/* 8xy5: Vx = Vx - Vy, Vf = Vx > Vy*/
 					case 0x5:
 						V[0xf] = V[x] > V[y];
 						V[x] = V[x] - V[y];
 					break;
+					/* 8xy6: Vx = Vx >> 1, Vf = Vx AND 1*/
 					case 0x6:
-						V[0xf] = V[x] | 0x1;
+						V[0xf] = V[x] & 0x1;
 						V[x] >>= 1;
 					break;
+					/* 8xy7: Vx = Vy - Vx, Vf = Vy > Vx*/
 					case 0x7:
 						V[0xf] = V[y] > V[x];
 						V[x] = V[y] - V[x];
 					break;
+					/* 8xy8: Vx = Vx << 1, Vf = Vx AND 80*/
 					case 0xE:
-						V[0xf] = V[x] | 0x80; /*0x80 = b1000 0000*/
+						V[0xf] = V[x] & 0x80; /*0x80 = b1000 0000*/
 						V[x] <<= 1;
 					break;
 				}
 			break;
+			/* 9xy0: Skip if Vx != Vy */
 			case 0x9:
 				if(V[x] != V[y]){
 					itter+=2;
 				}
 			break;
+			/* Annn: Set I = nnn */
 			case 0xA:
 				*I = nnn;
 			break;
+			/* Bnnn: Set program counter to nnn+V0 */
 			case 0xB:
 				itter = nnn+V[0];
 			break;
+			/* Cxkk: Set Vx = kk AND a random number */
 			case 0xC:
-				V[x] = kk&(rand()%255);
+				V[x] = kk&(rand()%256);
 			break;
+			/* Dxyn: Draw at (x, y) for sprite held at I with size n */
 			case 0xD:
 				draw(*I, V[x], V[y], n);
 			break;
 			case 0xE:
+				/* Ex9E: if key at Vx is pressed skipped */
 				if(kk == 0x9E){
 					if(pressed(V[x]))
 						itter+=2;
 				} 
+				/* Ex9E: if key at Vx is not pressed skipped */
 				if(kk == 0xA1){
 					if(!pressed(V[x]))
 						itter+=2;
 				}
 			break;
+			/* Fxkk: multiple*/
 			case 0xF:
 				switch(kk){
+					/* Fx07L set Vx to current DT */
 					case 0x07:
 						printf("WAITING %d ", *DT);
 						V[x] = *DT;
 					break;
+					/* Fx0A: wait until a key is pressed, store it in Vx */
 					case 0x0A:
 						V[x] = wait_pressed();
 					break;
+					/* Fx15: Set DT to Vx* /
 					case 0x15:
 						*DT = V[x];
 					break;
+					/* Fx18: Set ST to Vx */
 					case 0x18:
 						*ST = V[x];
 					break;
+					/* Fx1E: Add Vx to I */
 					case 0x1E:
 						*I += V[x];
 					break;
+					/* Fx29: Set I to the location of the sprite of the digit of Vx */
 					case 0x29:
 						*I = V[x]*5;
 					break;
+					/* Fx33: store Vx in decimal notation, starting at I*/
 					case 0x33:
 						memory[(*I)] =  V[x]/100;
 						memory[(*I)+1] = (V[x]-((V[x]/100)*100))/10;
 						memory[(*I)+2] =  V[x]-((V[x]/10)*10);
 					break;
+					/* Fx55: Store registers V0 through Vx in memory starting at location I. */
 					case 0x55:
 						for(int j = 0; j < x; j++){
 							memory[(*I)+j] = V[x];
 						}
 					break;
+					/* Fx65: Read registers V0 through Vx from memory starting at location I. */
 					case 0x65:
 						for(int j = 0; j < x; j++){
 							V[x] = memory[(*I)+j];
